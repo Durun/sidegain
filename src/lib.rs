@@ -1,11 +1,15 @@
-use nih_plug::prelude::*;
-use std::sync::Arc;
+mod editor;
 
+use nih_plug::buffer::{ChannelSamples, SamplesIter};
+use nih_plug::prelude::*;
+use nih_plug_vizia::ViziaState;
+use std::path::MAIN_SEPARATOR;
+use std::sync::Arc;
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
 // started
 
-struct SideGain {
+pub struct SideGain {
     params: Arc<SideGainParams>,
 }
 
@@ -15,8 +19,15 @@ struct SideGainParams {
     /// these IDs remain constant, you can rename and reorder these fields as you wish. The
     /// parameters are exposed to the host in the same order they were defined. In this case, this
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
-    #[id = "gain"]
-    pub gain: FloatParam,
+    #[id = "ratio_p_to_main"]
+    pub ratio_p_to_main: FloatParam,
+    #[id = "ratio_0_to_main"]
+    pub ratio_0_to_main: FloatParam,
+    #[id = "ratio_n_to_main"]
+    pub ratio_n_to_main: FloatParam,
+
+    #[persist = "editor_state"]
+    editor_state: Arc<ViziaState>,
 }
 
 impl Default for SideGain {
@@ -30,29 +41,23 @@ impl Default for SideGain {
 impl Default for SideGainParams {
     fn default() -> Self {
         Self {
-            // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
-            // to treat these kinds of parameters as if we were dealing with decibels. Storing this
-            // as decibels is easier to work with, but requires a conversion for every sample.
-            gain: FloatParam::new(
-                "Gain",
-                util::db_to_gain(0.0),
-                FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
-                    // This makes the range appear as if it was linear when displaying the values as
-                    // decibels
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
-                },
-            )
-            // Because the gain parameter is stored as linear gain instead of storing the value as
-            // decibels, we need logarithmic smoothing
-            .with_smoother(SmoothingStyle::Logarithmic(50.0))
-            .with_unit(" dB")
-            // There are many predefined formatters we can use here. If the gain was stored as
-            // decibels instead of as a linear gain value, we could have also used the
-            // `.with_step_size(0.1)` function to get internal rounding.
-            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            ratio_p_to_main: FloatParam::new(
+                "main x [+1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_0_to_main: FloatParam::new(
+                "main x [0]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_n_to_main: FloatParam::new(
+                "main x [-1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+
+            editor_state: editor::default_state(),
         }
     }
 }
@@ -67,24 +72,27 @@ impl Plugin for SideGain {
 
     // The first audio IO layout is used as the default. The other layouts may be selected either
     // explicitly or automatically by the host or the user depending on the plugin API/backend.
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
-        main_input_channels: NonZeroU32::new(2),
-        main_output_channels: NonZeroU32::new(2),
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
 
-        aux_input_ports: &[],
-        aux_output_ports: &[],
+            aux_input_ports: &[new_nonzero_u32(2)],
 
-        // Individual ports and the layout as a whole can be named here. By default these names
-        // are generated as needed. This layout will be called 'Stereo', while a layout with
-        // only one input and output channel would be called 'Mono'.
-        names: PortNames::const_default(),
-    }];
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(1),
 
+            aux_input_ports: &[new_nonzero_u32(1)],
+
+            ..AudioIOLayout::const_default()
+        },
+    ];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
-
-    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     // If the plugin can send or receive SysEx messages, it can define a type to wrap around those
     // messages here. The type implements the `SysExMessage` trait, which allows conversion to and
@@ -98,7 +106,9 @@ impl Plugin for SideGain {
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }
-
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(self.params.clone(), self.params.editor_state.clone())
+    }
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
@@ -118,16 +128,26 @@ impl Plugin for SideGain {
 
     fn process(
         &mut self,
-        buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
+        main: &mut Buffer,
+        aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain = self.params.gain.smoothed.next();
+        let trigger_input = &aux.inputs[0];
 
-            for sample in channel_samples {
-                *sample *= gain;
+        // main input を計算する
+        for (mut main_samples, trigger_samples) in main
+            .as_slice()
+            .iter_mut()
+            .zip(trigger_input.as_slice_immutable())
+        {
+            for (main_sample, triger_sample) in main_samples.iter_mut().zip(trigger_samples.iter())
+            {
+                *main_sample *= calc_ratio(
+                    *triger_sample,
+                    self.params.ratio_p_to_main.value(),
+                    self.params.ratio_0_to_main.value(),
+                    self.params.ratio_n_to_main.value(),
+                );
             }
         }
 
@@ -135,9 +155,18 @@ impl Plugin for SideGain {
     }
 }
 
+fn calc_ratio(trigger: f32, param_p_mix: f32, param_0_mix: f32, param_n_mix: f32) -> f32 {
+    if trigger < 0.0 {
+        param_n_mix * (-trigger) + param_0_mix * (trigger + 1.0)
+    } else {
+        param_p_mix * trigger + param_0_mix * (-trigger + 1.0)
+    }
+}
+
 impl ClapPlugin for SideGain {
     const CLAP_ID: &'static str = "com.github.durun.sidegain";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Audio Plugin that controlls gain by sidechain sample");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("Audio Plugin that controlls gain by sidechain sample");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
 
@@ -150,7 +179,7 @@ impl Vst3Plugin for SideGain {
 
     // And also don't forget to change these categories
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
-        &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
 }
 
 nih_export_clap!(SideGain);
