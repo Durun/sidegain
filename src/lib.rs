@@ -177,24 +177,27 @@ impl Plugin for SideGain {
     ) -> ProcessStatus {
         let trigger_input = &aux.inputs[0];
 
-        // main input を計算する
-        for (main_samples, trigger_samples) in main
-            .as_slice()
-            .iter_mut()
-            .zip(trigger_input.as_slice_immutable())
+        // Main を乗算する。
+        // バッファのコピー回数を減らすため、バッファをそのまま書き換えている
         {
-            for (main_sample, triger_sample) in main_samples.iter_mut().zip(trigger_samples.iter())
+            let mix_p = &self.params.ratio_p_to_main;
+            let mix_0 = &self.params.ratio_0_to_main;
+            let mix_n = &self.params.ratio_n_to_main;
+            for (main_samples, trigger_samples) in main
+                .as_slice()
+                .iter_mut()
+                .zip(trigger_input.as_slice_immutable())
             {
-                *main_sample *= calc_ratio(
-                    *triger_sample,
-                    self.params.ratio_p_to_main.value(),
-                    self.params.ratio_0_to_main.value(),
-                    self.params.ratio_n_to_main.value(),
-                );
+                for (main_sample, triger_sample) in
+                    main_samples.iter_mut().zip(trigger_samples.iter())
+                {
+                    *main_sample *=
+                        calc_ratio(*triger_sample, mix_p.value(), mix_0.value(), mix_n.value());
+                }
             }
         }
 
-        // aux を足しこむ
+        // aux A, B を足しこむ
         for (aux, mix_p, mix_0, mix_n) in [
             (
                 &aux.inputs[1],
@@ -209,6 +212,11 @@ impl Plugin for SideGain {
                 &self.params.ratio_n_to_aux_b,
             ),
         ] {
+            // skip for performance
+            if mix_p.value() == 0.0 && mix_0.value() == 0.0 && mix_n.value() == 0.0 {
+                continue;
+            }
+
             for ((main_samples, trigger_samples), aux_samples) in main
                 .as_slice()
                 .iter_mut()
