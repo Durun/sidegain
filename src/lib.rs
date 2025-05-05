@@ -23,8 +23,19 @@ struct SideGainParams {
     #[id = "ratio_n_to_main"]
     pub ratio_n_to_main: FloatParam,
 
-    #[persist = "editor_state"]
-    editor_state: Arc<ViziaState>,
+    #[id = "ratio_p_to_aux_a"]
+    pub ratio_p_to_aux_a: FloatParam,
+    #[id = "ratio_0_to_aux_a"]
+    pub ratio_0_to_aux_a: FloatParam,
+    #[id = "ratio_n_to_aux_a"]
+    pub ratio_n_to_aux_a: FloatParam,
+
+    #[id = "ratio_p_to_aux_b"]
+    pub ratio_p_to_aux_b: FloatParam,
+    #[id = "ratio_0_to_aux_b"]
+    pub ratio_0_to_aux_b: FloatParam,
+    #[id = "ratio_n_to_aux_b"]
+    pub ratio_n_to_aux_b: FloatParam,
 }
 
 impl Default for SideGain {
@@ -54,7 +65,37 @@ impl Default for SideGainParams {
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
 
-            editor_state: editor::default_state(),
+            ratio_p_to_aux_a: FloatParam::new(
+                "aux_a x [+1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_0_to_aux_a: FloatParam::new(
+                "aux_a x [0]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_n_to_aux_a: FloatParam::new(
+                "aux_a x [-1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+
+            ratio_p_to_aux_b: FloatParam::new(
+                "aux_b x [+1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_0_to_aux_b: FloatParam::new(
+                "aux_b x [0]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            ratio_n_to_aux_b: FloatParam::new(
+                "aux_b x [-1]",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
         }
     }
 }
@@ -74,16 +115,24 @@ impl Plugin for SideGain {
             main_input_channels: NonZeroU32::new(2),
             main_output_channels: NonZeroU32::new(2),
 
-            aux_input_ports: &[new_nonzero_u32(2)],
+            aux_input_ports: &[new_nonzero_u32(2); 3],
 
+            names: PortNames {
+                aux_inputs: &["Trigger", "A", "B"],
+                ..PortNames::const_default()
+            },
             ..AudioIOLayout::const_default()
         },
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(1),
             main_output_channels: NonZeroU32::new(1),
 
-            aux_input_ports: &[new_nonzero_u32(1)],
+            aux_input_ports: &[new_nonzero_u32(1); 3],
 
+            names: PortNames {
+                aux_inputs: &["Trigger", "A", "B"],
+                ..PortNames::const_default()
+            },
             ..AudioIOLayout::const_default()
         },
     ];
@@ -129,7 +178,7 @@ impl Plugin for SideGain {
         let trigger_input = &aux.inputs[0];
 
         // main input を計算する
-        for (mut main_samples, trigger_samples) in main
+        for (main_samples, trigger_samples) in main
             .as_slice()
             .iter_mut()
             .zip(trigger_input.as_slice_immutable())
@@ -142,6 +191,38 @@ impl Plugin for SideGain {
                     self.params.ratio_0_to_main.value(),
                     self.params.ratio_n_to_main.value(),
                 );
+            }
+        }
+
+        // aux を足しこむ
+        for (aux, mix_p, mix_0, mix_n) in [
+            (
+                &aux.inputs[1],
+                &self.params.ratio_p_to_aux_a,
+                &self.params.ratio_0_to_aux_a,
+                &self.params.ratio_n_to_aux_a,
+            ),
+            (
+                &aux.inputs[2],
+                &self.params.ratio_p_to_aux_b,
+                &self.params.ratio_0_to_aux_b,
+                &self.params.ratio_n_to_aux_b,
+            ),
+        ] {
+            for ((main_samples, trigger_samples), aux_samples) in main
+                .as_slice()
+                .iter_mut()
+                .zip(trigger_input.as_slice_immutable())
+                .zip(aux.as_slice_immutable())
+            {
+                for ((main_sample, triger_sample), aux_sample) in main_samples
+                    .iter_mut()
+                    .zip(trigger_samples.iter())
+                    .zip(aux_samples.iter())
+                {
+                    *main_sample += aux_sample
+                        * calc_ratio(*triger_sample, mix_p.value(), mix_0.value(), mix_n.value());
+                }
             }
         }
 
