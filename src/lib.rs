@@ -48,49 +48,49 @@ impl Default for SideGainParams {
     fn default() -> Self {
         Self {
             ratio_p_to_main: FloatParam::new(
-                "main x [+1]",
+                "Main <- Trigger+",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_0_to_main: FloatParam::new(
-                "main x [0]",
+                "Main <- Trigger0",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_n_to_main: FloatParam::new(
-                "main x [-1]",
+                "Main <- Trigger-",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
 
             ratio_p_to_aux_a: FloatParam::new(
-                "aux_a x [+1]",
+                "A <- Trigger+",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_0_to_aux_a: FloatParam::new(
-                "aux_a x [0]",
+                "A <- Trigger0",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_n_to_aux_a: FloatParam::new(
-                "aux_a x [-1]",
+                "A <- Trigger-",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
 
             ratio_p_to_aux_b: FloatParam::new(
-                "aux_b x [+1]",
+                "B <- Trigger+",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_0_to_aux_b: FloatParam::new(
-                "aux_b x [0]",
+                "B <- Trigger0",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
             ratio_n_to_aux_b: FloatParam::new(
-                "aux_b x [-1]",
+                "B <- Trigger-",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ),
