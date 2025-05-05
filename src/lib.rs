@@ -1,8 +1,5 @@
-mod editor;
-
 use nih_plug::buffer::{ChannelSamples, SamplesIter};
 use nih_plug::prelude::*;
-use nih_plug_vizia::ViziaState;
 use std::path::MAIN_SEPARATOR;
 use std::sync::Arc;
 // This is a shortened version of the gain example with most comments removed, check out
@@ -105,9 +102,6 @@ impl Plugin for SideGain {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
-    }
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone(), self.params.editor_state.clone())
     }
     fn initialize(
         &mut self,
