@@ -232,8 +232,14 @@ impl Plugin for SideGain {
 
 fn calc_ratio(trigger: f32, param_p_mix: f32, param_0_mix: f32, param_n_mix: f32) -> f32 {
     if trigger < 0.0 {
+        // clip
+        let trigger = if trigger < -1.0 { -1.0 } else { trigger };
+
         param_n_mix * (-trigger) + param_0_mix * (trigger + 1.0)
     } else {
+        // clip
+        let trigger = if trigger > 1.0 { 1.0 } else { trigger };
+
         param_p_mix * trigger + param_0_mix * (-trigger + 1.0)
     }
 }
